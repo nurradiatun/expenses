@@ -1,0 +1,6 @@
+{
+  "name": "Khasanah",
+  "description": "Aplikasi pencatatan keuangan pribadi terenkripsi ujung-ke-ujung dengan sinkronisasi lintas perangkat real-time, pembacaan mutasi PDF otomatis, laporan CSV/PDF, dan integrasi harian ADCB Bank.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

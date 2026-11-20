@@ -1,0 +1,498 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidSharedWithUids(data) {
+      return !('sharedWithUids' in data)
+        || (
+          data.sharedWithUids is list
+          && data.sharedWithUids.size() <= 10
+          && (data.sharedWithUids.size() == 0 || isValidId(data.sharedWithUids[0]))
+        );
+    }
+
+    function isSharedListMember(data) {
+      return ('sharedWithUids' in data)
+        && data.sharedWithUids is list
+        && request.auth.uid in data.sharedWithUids;
+    }
+
+    function hasVaultAccess(vaultOwnerId) {
+      return isSignedIn() && (
+        request.auth.uid == vaultOwnerId
+        || exists(/databases/$(database)/documents/vaultMembers/$(vaultOwnerId + '__' + request.auth.uid))
+      );
+    }
+
+    function canWriteVault(vaultOwnerId) {
+      return isVerifiedUser() && (
+        request.auth.uid == vaultOwnerId
+        || (
+          exists(/databases/$(database)/documents/vaultMembers/$(vaultOwnerId + '__' + request.auth.uid))
+          && get(/databases/$(database)/documents/vaultMembers/$(vaultOwnerId + '__' + request.auth.uid)).data.role == 'editor'
+        )
+      );
+    }
+
+    // Validation Blueprints
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'preferredCurrency', 'aedToIdrRate', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'preferredCurrency', 'aedToIdrRate', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid == request.auth.uid && data.uid == userId && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.preferredCurrency is string && data.preferredCurrency in ['AED', 'IDR', 'USD']
+        && (data.aedToIdrRate is number) && data.aedToIdrRate > 0 && data.aedToIdrRate < 1000000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidVaultConfig(data, userId) {
+      return data.keys().hasAll(['ownerId', 'salt', 'kdfIterations', 'keyCheckCiphertext', 'keyCheckIv', 'algorithm', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'salt', 'kdfIterations', 'keyCheckCiphertext', 'keyCheckIv', 'algorithm', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId == request.auth.uid && data.ownerId == userId && isValidId(data.ownerId)
+        && data.salt is string && data.salt.size() >= 12 && data.salt.size() <= 128
+        && data.kdfIterations is int && data.kdfIterations >= 100000 && data.kdfIterations <= 1000000
+        && data.keyCheckCiphertext is string && data.keyCheckCiphertext.size() >= 8 && data.keyCheckCiphertext.size() <= 512
+        && data.keyCheckIv is string && data.keyCheckIv.size() >= 8 && data.keyCheckIv.size() <= 64
+        && data.algorithm is string && data.algorithm == 'AES-GCM-256'
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidVaultShare(data) {
+      return data.keys().hasAll(['vaultOwnerId', 'ownerEmail', 'ownerDisplayName', 'memberEmail', 'memberUid', 'memberDisplayName', 'role', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['vaultOwnerId', 'ownerEmail', 'ownerDisplayName', 'memberEmail', 'memberUid', 'memberDisplayName', 'role', 'status', 'createdAt', 'updatedAt'])
+        && isValidId(data.vaultOwnerId)
+        && data.ownerEmail is string && data.ownerEmail.size() >= 3 && data.ownerEmail.size() <= 254
+        && data.ownerDisplayName is string && data.ownerDisplayName.size() >= 1 && data.ownerDisplayName.size() <= 120
+        && data.memberEmail is string && data.memberEmail.size() >= 3 && data.memberEmail.size() <= 254
+        && data.memberUid is string && (data.memberUid == '' || isValidId(data.memberUid))
+        && data.memberDisplayName is string && data.memberDisplayName.size() <= 120
+        && data.role is string && data.role in ['editor', 'viewer']
+        && data.status is string && data.status in ['pending', 'active', 'revoked']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidVaultMember(data) {
+      return data.keys().hasAll(['vaultOwnerId', 'memberUid', 'memberEmail', 'memberDisplayName', 'role', 'shareId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['vaultOwnerId', 'memberUid', 'memberEmail', 'memberDisplayName', 'role', 'shareId', 'createdAt', 'updatedAt'])
+        && isValidId(data.vaultOwnerId)
+        && isValidId(data.memberUid)
+        && data.memberEmail is string && data.memberEmail.size() >= 3 && data.memberEmail.size() <= 254
+        && data.memberDisplayName is string && data.memberDisplayName.size() >= 1 && data.memberDisplayName.size() <= 120
+        && data.role is string && data.role in ['editor', 'viewer']
+        && isValidId(data.shareId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAccount(data) {
+      return data.keys().hasAll(['ownerId', 'provider', 'currency', 'autoSyncDaily', 'syncHour', 'lastSyncedAtIso', 'encryptedPayload', 'iv', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'sharedWithUids', 'provider', 'currency', 'autoSyncDaily', 'syncHour', 'lastSyncedAtIso', 'encryptedPayload', 'iv', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidSharedWithUids(data)
+        && data.provider is string && data.provider in ['ADCB', 'MANUAL', 'BCA', 'MANDIRI', 'OTHER']
+        && data.currency is string && data.currency in ['AED', 'IDR', 'USD', 'SGD', 'EUR']
+        && data.autoSyncDaily is bool
+        && data.syncHour is int && data.syncHour >= 0 && data.syncHour <= 23
+        && data.lastSyncedAtIso is string && data.lastSyncedAtIso.size() <= 64
+        && data.encryptedPayload is string && data.encryptedPayload.size() >= 8 && data.encryptedPayload.size() <= 16384
+        && data.iv is string && data.iv.size() >= 8 && data.iv.size() <= 64
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['ownerId', 'accountId', 'monthKey', 'txType', 'source', 'encryptedPayload', 'iv', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'sharedWithUids', 'accountId', 'monthKey', 'txType', 'source', 'encryptedPayload', 'iv', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidSharedWithUids(data)
+        && isValidId(data.accountId)
+        && data.monthKey is string && data.monthKey.size() == 7 && data.monthKey.matches('^[0-9]{4}-[0-9]{2}$')
+        && data.txType is string && data.txType in ['income', 'expense']
+        && data.source is string && data.source in ['manual', 'pdf', 'adcb_api']
+        && data.encryptedPayload is string && data.encryptedPayload.size() >= 8 && data.encryptedPayload.size() <= 16384
+        && data.iv is string && data.iv.size() >= 8 && data.iv.size() <= 64
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSyncLog(data) {
+      return data.keys().hasAll(['ownerId', 'accountId', 'syncType', 'status', 'recordsCount', 'encryptedSummary', 'iv', 'createdAt'])
+        && data.keys().hasOnly(['ownerId', 'sharedWithUids', 'accountId', 'syncType', 'status', 'recordsCount', 'encryptedSummary', 'iv', 'createdAt'])
+        && isValidId(data.ownerId)
+        && isValidSharedWithUids(data)
+        && isValidId(data.accountId)
+        && data.syncType is string && data.syncType in ['adcb_daily', 'adcb_manual', 'pdf_import']
+        && data.status is string && data.status in ['success', 'failed']
+        && data.recordsCount is int && data.recordsCount >= 0 && data.recordsCount <= 10000
+        && data.encryptedSummary is string && data.encryptedSummary.size() >= 8 && data.encryptedSummary.size() <= 8192
+        && data.iv is string && data.iv.size() >= 8 && data.iv.size() <= 64
+        && data.createdAt is timestamp;
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasAll(['ownerId', 'encryptedPayload', 'iv', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'sharedWithUids', 'encryptedPayload', 'iv', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidSharedWithUids(data)
+        && data.encryptedPayload is string && data.encryptedPayload.size() >= 8 && data.encryptedPayload.size() <= 4096
+        && data.iv is string && data.iv.size() >= 8 && data.iv.size() <= 64
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidBudget(data) {
+      return data.keys().hasAll(['ownerId', 'encryptedPayload', 'iv', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'sharedWithUids', 'encryptedPayload', 'iv', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && isValidSharedWithUids(data)
+        && data.encryptedPayload is string && data.encryptedPayload.size() >= 8 && data.encryptedPayload.size() <= 4096
+        && data.iv is string && data.iv.size() >= 8 && data.iv.size() <= 64
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Users collection (strictly private PII isolation)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isValidId(userId)
+        && isVerifiedUser()
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isVerifiedUser()
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'preferredCurrency', 'aedToIdrRate', 'updatedAt']);
+      allow delete: if false;
+
+      match /vaultConfig/{configId} {
+        allow get: if isValidId(userId) && isValidId(configId) && configId == 'main' && (
+          isOwner(userId)
+          || (isVerifiedUser() && exists(/databases/$(database)/documents/vaultMembers/$(userId + '__' + request.auth.uid)))
+        );
+        allow list: if false;
+        allow create: if isValidId(userId)
+          && isValidId(configId)
+          && configId == 'main'
+          && isVerifiedUser()
+          && isOwner(userId)
+          && isValidVaultConfig(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId)
+          && isValidId(configId)
+          && configId == 'main'
+          && isVerifiedUser()
+          && isOwner(userId)
+          && isValidVaultConfig(incoming(), userId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['salt', 'kdfIterations', 'keyCheckCiphertext', 'keyCheckIv', 'updatedAt']);
+        allow delete: if false;
+      }
+    }
+
+    // Vault Shares collection (invitations & sharing management)
+    match /vaultShares/{shareId} {
+      allow get: if isValidId(shareId) && isSignedIn() && (
+        existing().vaultOwnerId == request.auth.uid
+        || existing().memberUid == request.auth.uid
+        || (isVerifiedUser() && existing().memberEmail == request.auth.token.email.lower())
+      );
+      allow list: if isSignedIn() && (
+        resource.data.vaultOwnerId == request.auth.uid
+        || resource.data.memberUid == request.auth.uid
+        || (request.auth.token.email_verified == true && resource.data.memberEmail == request.auth.token.email.lower())
+      );
+      allow create: if isValidId(shareId)
+        && isVerifiedUser()
+        && isValidVaultShare(incoming())
+        && incoming().vaultOwnerId == request.auth.uid
+        && incoming().ownerEmail == request.auth.token.email.lower()
+        && incoming().memberEmail != request.auth.token.email.lower()
+        && incoming().memberUid == ''
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(shareId)
+        && isVerifiedUser()
+        && isValidVaultShare(incoming())
+        && existing().status != 'revoked'
+        && incoming().vaultOwnerId == existing().vaultOwnerId
+        && incoming().ownerEmail == existing().ownerEmail
+        && incoming().memberEmail == existing().memberEmail
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Invited partner accepts pending invitation atomically with vaultMembers creation
+          (
+            existing().status == 'pending'
+            && incoming().status == 'active'
+            && existing().memberEmail == request.auth.token.email.lower()
+            && incoming().memberUid == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly(['memberUid', 'memberDisplayName', 'status', 'updatedAt'])
+            && existsAfter(/databases/$(database)/documents/vaultMembers/$(existing().vaultOwnerId + '__' + request.auth.uid))
+          )
+          // Action 2: Owner updates member role
+          || (
+            existing().vaultOwnerId == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt'])
+          )
+          // Action 3: Owner or member revokes active/pending share
+          || (
+            (existing().vaultOwnerId == request.auth.uid || existing().memberUid == request.auth.uid)
+            && incoming().status == 'revoked'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(shareId) && isVerifiedUser() && (
+        existing().vaultOwnerId == request.auth.uid
+        || existing().memberUid == request.auth.uid
+      );
+    }
+
+    // Active Vault Members lookup collection
+    match /vaultMembers/{membershipId} {
+      allow get: if isValidId(membershipId) && isSignedIn() && (
+        existing().vaultOwnerId == request.auth.uid
+        || existing().memberUid == request.auth.uid
+      );
+      allow list: if isSignedIn() && (
+        resource.data.vaultOwnerId == request.auth.uid
+        || resource.data.memberUid == request.auth.uid
+      );
+      allow create: if isValidId(membershipId)
+        && isVerifiedUser()
+        && isValidVaultMember(incoming())
+        && incoming().memberUid == request.auth.uid
+        && membershipId == (incoming().vaultOwnerId + '__' + request.auth.uid)
+        && incoming().memberEmail == request.auth.token.email.lower()
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/vaultShares/$(incoming().shareId))
+        && get(/databases/$(database)/documents/vaultShares/$(incoming().shareId)).data.vaultOwnerId == incoming().vaultOwnerId
+        && get(/databases/$(database)/documents/vaultShares/$(incoming().shareId)).data.memberEmail == request.auth.token.email.lower()
+        && get(/databases/$(database)/documents/vaultShares/$(incoming().shareId)).data.role == incoming().role
+        && get(/databases/$(database)/documents/vaultShares/$(incoming().shareId)).data.status == 'pending'
+        && getAfter(/databases/$(database)/documents/vaultShares/$(incoming().shareId)).data.status == 'active';
+      allow update: if isValidId(membershipId)
+        && isVerifiedUser()
+        && existing().vaultOwnerId == request.auth.uid
+        && isValidVaultMember(incoming())
+        && incoming().vaultOwnerId == existing().vaultOwnerId
+        && incoming().memberUid == existing().memberUid
+        && incoming().memberEmail == existing().memberEmail
+        && incoming().shareId == existing().shareId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt']);
+      allow delete: if isValidId(membershipId) && isVerifiedUser() && (
+        existing().vaultOwnerId == request.auth.uid
+        || existing().memberUid == request.auth.uid
+      );
+    }
+
+    // Accounts collection
+    match /accounts/{accountId} {
+      allow get: if isValidId(accountId) && isSignedIn() && (
+        existing().ownerId == request.auth.uid
+        || isSharedListMember(existing())
+        || hasVaultAccess(existing().ownerId)
+      );
+      allow list: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid
+        || isSharedListMember(resource.data)
+      );
+      allow create: if isValidId(accountId)
+        && isVerifiedUser()
+        && isValidAccount(incoming())
+        && canWriteVault(incoming().ownerId)
+        && (incoming().ownerId == request.auth.uid || isSharedListMember(incoming()))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(accountId)
+        && isVerifiedUser()
+        && canWriteVault(existing().ownerId)
+        && isValidAccount(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['autoSyncDaily', 'syncHour', 'lastSyncedAtIso', 'encryptedPayload', 'iv', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['encryptedPayload', 'iv', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['provider', 'currency', 'autoSyncDaily', 'syncHour', 'encryptedPayload', 'iv', 'updatedAt'])
+          || (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithUids', 'updatedAt']))
+        );
+      allow delete: if isValidId(accountId) && canWriteVault(existing().ownerId);
+    }
+
+    // Transactions collection (relational ownership verification on create)
+    match /transactions/{txId} {
+      allow get: if isValidId(txId) && isSignedIn() && (
+        existing().ownerId == request.auth.uid
+        || isSharedListMember(existing())
+        || hasVaultAccess(existing().ownerId)
+      );
+      allow list: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid
+        || isSharedListMember(resource.data)
+      );
+      allow create: if isValidId(txId)
+        && isVerifiedUser()
+        && isValidTransaction(incoming())
+        && canWriteVault(incoming().ownerId)
+        && (incoming().ownerId == request.auth.uid || isSharedListMember(incoming()))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/accounts/$(incoming().accountId))
+        && get(/databases/$(database)/documents/accounts/$(incoming().accountId)).data.ownerId == incoming().ownerId;
+      allow update: if isValidId(txId)
+        && isVerifiedUser()
+        && canWriteVault(existing().ownerId)
+        && isValidTransaction(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().accountId == existing().accountId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['monthKey', 'txType', 'encryptedPayload', 'iv', 'updatedAt'])
+          || (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithUids', 'updatedAt']))
+        );
+      allow delete: if isValidId(txId) && canWriteVault(existing().ownerId);
+    }
+
+    // Sync logs collection (audit log)
+    match /syncLogs/{logId} {
+      allow get: if isValidId(logId) && isSignedIn() && (
+        existing().ownerId == request.auth.uid
+        || isSharedListMember(existing())
+        || hasVaultAccess(existing().ownerId)
+      );
+      allow list: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid
+        || isSharedListMember(resource.data)
+      );
+      allow create: if isValidId(logId)
+        && isVerifiedUser()
+        && isValidSyncLog(incoming())
+        && canWriteVault(incoming().ownerId)
+        && (incoming().ownerId == request.auth.uid || isSharedListMember(incoming()))
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/accounts/$(incoming().accountId))
+        && get(/databases/$(database)/documents/accounts/$(incoming().accountId)).data.ownerId == incoming().ownerId;
+      allow update: if isValidId(logId)
+        && isVerifiedUser()
+        && existing().ownerId == request.auth.uid
+        && isValidSyncLog(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().accountId == existing().accountId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithUids']);
+      allow delete: if isValidId(logId) && canWriteVault(existing().ownerId);
+    }
+
+    // Custom Categories collection (encrypted user-defined categories)
+    match /categories/{categoryId} {
+      allow get: if isValidId(categoryId) && isSignedIn() && (
+        existing().ownerId == request.auth.uid
+        || isSharedListMember(existing())
+        || hasVaultAccess(existing().ownerId)
+      );
+      allow list: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid
+        || isSharedListMember(resource.data)
+      );
+      allow create: if isValidId(categoryId)
+        && isVerifiedUser()
+        && isValidCategory(incoming())
+        && canWriteVault(incoming().ownerId)
+        && (incoming().ownerId == request.auth.uid || isSharedListMember(incoming()))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(categoryId)
+        && isVerifiedUser()
+        && canWriteVault(existing().ownerId)
+        && isValidCategory(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['encryptedPayload', 'iv', 'updatedAt'])
+          || (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithUids', 'updatedAt']))
+        );
+      allow delete: if isValidId(categoryId) && canWriteVault(existing().ownerId);
+    }
+
+    // Category Monthly Budgets collection (encrypted monthly & multi-month limits per category)
+    match /budgets/{budgetId} {
+      allow get: if isValidId(budgetId) && isSignedIn() && (
+        existing().ownerId == request.auth.uid
+        || isSharedListMember(existing())
+        || hasVaultAccess(existing().ownerId)
+      );
+      allow list: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid
+        || isSharedListMember(resource.data)
+      );
+      allow create: if isValidId(budgetId)
+        && isVerifiedUser()
+        && isValidBudget(incoming())
+        && canWriteVault(incoming().ownerId)
+        && (incoming().ownerId == request.auth.uid || isSharedListMember(incoming()))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(budgetId)
+        && isVerifiedUser()
+        && canWriteVault(existing().ownerId)
+        && isValidBudget(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['encryptedPayload', 'iv', 'updatedAt'])
+          || (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithUids', 'updatedAt']))
+        );
+      allow delete: if isValidId(budgetId) && canWriteVault(existing().ownerId);
+    }
+  }
+}

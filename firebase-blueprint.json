@@ -1,0 +1,433 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Private user profile and display preferences for personal finance synchronization.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth user ID."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 254,
+          "description": "User verified email address."
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Display name."
+        },
+        "preferredCurrency": {
+          "type": "string",
+          "enum": ["AED", "IDR", "USD"],
+          "description": "Primary reporting currency."
+        },
+        "aedToIdrRate": {
+          "type": "number",
+          "description": "Configured AED to IDR conversion rate."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "displayName", "preferredCurrency", "aedToIdrRate", "createdAt", "updatedAt"]
+    },
+    "VaultConfig": {
+      "title": "Vault Key Config",
+      "description": "Zero-knowledge PBKDF2 salt and AES-GCM key verification check for E2E encryption.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "salt": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Base64 PBKDF2 salt."
+        },
+        "kdfIterations": {
+          "type": "integer",
+          "description": "PBKDF2-SHA256 iteration count."
+        },
+        "keyCheckCiphertext": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "AES-GCM encrypted verification token."
+        },
+        "keyCheckIv": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "AES-GCM verification IV."
+        },
+        "algorithm": {
+          "type": "string",
+          "enum": ["AES-GCM-256"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "salt", "kdfIterations", "keyCheckCiphertext", "keyCheckIv", "algorithm", "createdAt", "updatedAt"]
+    },
+    "VaultShare": {
+      "title": "Vault Share Invitation",
+      "description": "Invitation and access grant allowing a family member or partner to access a shared encrypted vault.",
+      "type": "object",
+      "properties": {
+        "vaultOwnerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 254
+        },
+        "ownerDisplayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "memberEmail": {
+          "type": "string",
+          "maxLength": 254
+        },
+        "memberUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "memberDisplayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["editor", "viewer"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "active", "revoked"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["vaultOwnerId", "ownerEmail", "ownerDisplayName", "memberEmail", "memberUid", "memberDisplayName", "role", "status", "createdAt", "updatedAt"]
+    },
+    "VaultMember": {
+      "title": "Active Vault Member",
+      "description": "Verified active membership linking a member UID to a shared vault owner UID.",
+      "type": "object",
+      "properties": {
+        "vaultOwnerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "memberUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "memberEmail": {
+          "type": "string",
+          "maxLength": 254
+        },
+        "memberDisplayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["editor", "viewer"]
+        },
+        "shareId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["vaultOwnerId", "memberUid", "memberEmail", "memberDisplayName", "role", "shareId", "createdAt", "updatedAt"]
+    },
+    "Account": {
+      "title": "Encrypted Financial Account",
+      "description": "Bank or wallet account with end-to-end encrypted balances and account numbers.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "sharedWithUids": {
+          "type": "array",
+          "description": "Bounded list (max 10) of UIDs allowed to query this shared account."
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["ADCB", "MANUAL", "BCA", "MANDIRI", "OTHER"]
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["AED", "IDR", "USD", "SGD", "EUR"]
+        },
+        "autoSyncDaily": {
+          "type": "boolean"
+        },
+        "syncHour": {
+          "type": "integer"
+        },
+        "lastSyncedAtIso": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "encryptedPayload": {
+          "type": "string",
+          "maxLength": 16384,
+          "description": "AES-256-GCM ciphertext of sensitive account details and balance."
+        },
+        "iv": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "provider", "currency", "autoSyncDaily", "syncHour", "lastSyncedAtIso", "encryptedPayload", "iv", "createdAt", "updatedAt"]
+    },
+    "Transaction": {
+      "title": "Encrypted Transaction",
+      "description": "Personal finance ledger entry with end-to-end encrypted amount, description, category, and recorder audit history.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "sharedWithUids": {
+          "type": "array",
+          "description": "Bounded list (max 10) of UIDs allowed to query this shared transaction."
+        },
+        "accountId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "monthKey": {
+          "type": "string",
+          "maxLength": 7,
+          "pattern": "^[0-9]{4}-[0-9]{2}$"
+        },
+        "txType": {
+          "type": "string",
+          "enum": ["income", "expense"]
+        },
+        "source": {
+          "type": "string",
+          "enum": ["manual", "pdf", "adcb_api"]
+        },
+        "encryptedPayload": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "iv": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "accountId", "monthKey", "txType", "source", "encryptedPayload", "iv", "createdAt", "updatedAt"]
+    },
+    "SyncLog": {
+      "title": "Bank & Statement Sync Log",
+      "description": "Audit log of ADCB daily API balance refreshes and PDF statement imports.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "sharedWithUids": {
+          "type": "array",
+          "description": "Bounded list (max 10) of UIDs allowed to query this shared log."
+        },
+        "accountId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "syncType": {
+          "type": "string",
+          "enum": ["adcb_daily", "adcb_manual", "pdf_import"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["success", "failed"]
+        },
+        "recordsCount": {
+          "type": "integer"
+        },
+        "encryptedSummary": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "iv": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "accountId", "syncType", "status", "recordsCount", "encryptedSummary", "iv", "createdAt"]
+    },
+    "CustomCategory": {
+      "title": "Encrypted Custom Category",
+      "description": "User-defined transaction category encrypted client-side and synchronized across devices.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "sharedWithUids": {
+          "type": "array",
+          "description": "Bounded list (max 10) of UIDs allowed to query this shared category."
+        },
+        "encryptedPayload": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "iv": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "encryptedPayload", "iv", "createdAt", "updatedAt"]
+    },
+    "CategoryBudget": {
+      "title": "Encrypted Category Budget",
+      "description": "User-defined monthly, multi-month, or future-month spending/income category budgets encrypted client-side and synchronized across devices.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "sharedWithUids": {
+          "type": "array",
+          "description": "Bounded list (max 10) of UIDs allowed to query this shared budget."
+        },
+        "encryptedPayload": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "iv": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "encryptedPayload", "iv", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user settings and preferences."
+    },
+    "/users/{userId}/vaultConfig/{configId}": {
+      "schema": { "$ref": "#/entities/VaultConfig" },
+      "description": "Zero-knowledge encryption salt and verification token."
+    },
+    "/vaultShares/{shareId}": {
+      "schema": { "$ref": "#/entities/VaultShare" },
+      "description": "Multi-account sharing invitations and status grants."
+    },
+    "/vaultMembers/{membershipId}": {
+      "schema": { "$ref": "#/entities/VaultMember" },
+      "description": "Active shared vault membership lookup documents."
+    },
+    "/accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/Account" },
+      "description": "Encrypted user bank and wallet accounts."
+    },
+    "/transactions/{txId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "Encrypted financial transactions synced across devices and shared vault members."
+    },
+    "/syncLogs/{logId}": {
+      "schema": { "$ref": "#/entities/SyncLog" },
+      "description": "Encrypted sync and PDF import logs."
+    },
+    "/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/CustomCategory" },
+      "description": "Encrypted user-defined custom transaction categories."
+    },
+    "/budgets/{budgetId}": {
+      "schema": { "$ref": "#/entities/CategoryBudget" },
+      "description": "Encrypted monthly, multi-month, and future-month spending/income category budgets."
+    }
+  }
+}
